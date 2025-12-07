@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+// MPT Stage types
+export type MPTStage = 
+  | 'start_session'
+  | 'collect_context'
+  | 'clarify_request'
+  | 'explore_strategy'
+  | 'find_need'
+  | 'bodywork'
+  | 'metaphor'
+  | 'meta_position'
+  | 'integration'
+  | 'plan_actions'
+  | 'finish';
+
 // Message types
 export interface Message {
   id: string;
@@ -8,24 +22,78 @@ export interface Message {
   timestamp: string;
 }
 
+// Request clarification data
+export interface RequestClarification {
+  isPositive: boolean | null;
+  hasAuthorship: boolean | null;
+  isConcrete: boolean | null;
+  isRealistic: boolean | null;
+  motivationChecked: boolean | null;
+  clarifiedRequest: string | null;
+}
+
+// Bodywork data
+export interface BodyworkData {
+  location: string | null;
+  size: string | null;
+  shape: string | null;
+  density: string | null;
+  temperature: string | null;
+  movement: string | null;
+  impulse: string | null;
+}
+
+// Metaphor data
+export interface MetaphorData {
+  image: string | null;
+  qualities: string | null;
+  energyLevel: number | null;
+}
+
+// Meta-position data
+export interface MetaPositionData {
+  viewOfSelf: string | null;
+  viewOfLife: string | null;
+  viewOfStrategy: string | null;
+  insight: string | null;
+  messageFromImage: string | null;
+}
+
+// Integration data
+export interface IntegrationData {
+  newFeeling: string | null;
+  movementDone: boolean;
+  integratedState: string | null;
+}
+
 // Therapy context - data collected during session
 export interface TherapyContext {
   clientName: string | null;
   currentGoal: string | null;
+  originalRequest: string | null;
+  clarifiedRequest: string | null;
+  currentStrategy: string | null;
+  strategyIntention: string | null;
   deepNeed: string | null;
   bodyLocation: string | null;
   metaphor: string | null;
   energyLevel: number | null;
   newActions: string[];
+  firstStep: string | null;
   homework: string | null;
   stageData: Record<string, string>;
+  requestClarification: RequestClarification;
+  bodyworkData: BodyworkData;
+  metaphorData: MetaphorData;
+  metaPositionData: MetaPositionData;
+  integrationData: IntegrationData;
 }
 
-// Session state for tracking therapy progress
+// Session state for tracking therapy progress (FSM-based)
 export interface SessionStateData {
-  currentStageIndex: number;
+  currentStage: MPTStage;
   currentQuestionIndex: number;
-  stageHistory: string[];
+  stageHistory: MPTStage[];
   context: TherapyContext;
   requestType: string | null;
   importanceRating: number | null;
@@ -83,6 +151,8 @@ export type ChatResponse = {
   scenarioName?: string | null;
   content?: string;
   phase?: string;
+  currentStage?: MPTStage;
+  stageName?: string;
   message?: string;
 };
 

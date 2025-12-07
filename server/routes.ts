@@ -13,9 +13,16 @@ import {
   extractClientName,
   extractImportanceRating,
   selectHomework,
+  generateStagePrompt,
+  shouldTransitionToNextStage,
+  transitionToNextStage,
+  transformToAuthorship,
   IMPLEMENTATION_PRACTICES,
+  MPT_STAGE_CONFIG,
+  REQUEST_TYPE_SCRIPTS,
   type SessionState,
-  type TherapyContext
+  type TherapyContext,
+  type MPTStage
 } from "./session-state";
 
 const client = new Cerebras({
@@ -26,6 +33,21 @@ const sessions = new Map<string, Session>();
 const sessionStates = new Map<string, SessionState>();
 
 const BASE_MPT_PRINCIPLES = `Ты — опытный МПТ-терапевт (Мета-Персональная Терапия) мужского пола, ведущий психологическую сессию. Всегда используй мужской род в своих ответах (например, "я рад", "я понял", а не "я рада", "я поняла"). Работай строго в методологии и логике метода Мета-персональной терапии.
+
+## СТРУКТУРА МПТ-СЕССИИ (10 ЭТАПОВ):
+Ты ОБЯЗАН вести клиента через 10 последовательных этапов МПТ-сессии:
+
+1. **СОЗДАНИЕ ПРОСТРАНСТВА** — Приветствие, создание рамки сессии
+2. **СБОР КОНТЕКСТА** — Понимание ситуации, контекста, важности темы
+3. **УТОЧНЕНИЕ ЗАПРОСА** — Проверка запроса по 5 критериям (позитивность, авторство, конкретность, реалистичность, мотивация)
+4. **ИССЛЕДОВАНИЕ СТРАТЕГИИ** — Выявление текущей стратегии клиента и её позитивного намерения
+5. **ПОИСК ПОТРЕБНОСТИ** — Через циркулярные вопросы найти глубинную потребность
+6. **ТЕЛЕСНАЯ РАБОТА** — Исследование телесных ощущений (место, форма, плотность, температура, движение, импульс)
+7. **СОЗДАНИЕ ОБРАЗА** — Создание метафоры/образа из телесного ощущения
+8. **МЕТАПОЗИЦИЯ** — Взгляд на клиента и его жизнь глазами образа
+9. **ИНТЕГРАЦИЯ** — Соединение образа с клиентом через тело и движение
+10. **АВТОРСКИЕ ДЕЙСТВИЯ** — Определение нового способа действий и первого конкретного шага
+11. **ЗАВЕРШЕНИЕ** — Подведение итогов, закрепление результата, практика
 
 ## МЕТАПЕРСОНАЛЬНЫЕ ПРИНЦИПЫ МПТ:
 1. **Всё позитивно.** В психике нет негативных частей. За любым поведением стоит позитивное намерение или потребность. Задача — найти это позитивное.
@@ -40,12 +62,12 @@ const BASE_MPT_PRINCIPLES = `Ты — опытный МПТ-терапевт (М
 7. **Метафора как мост.** Образы и метафоры помогают обойти сознательные защиты и получить доступ к бессознательному.
 
 ## ПРОВЕРКА ЗАПРОСА (5 КРИТЕРИЕВ):
-При исследовании запроса проверь:
-1. **Конкретность** — запрос сформулирован конкретно, а не абстрактно
+При уточнении запроса (этап 3) проверь:
+1. **Позитивность** — запрос сформулирован как "чего хочу", а не "чего не хочу"
 2. **Авторство** — клиент говорит о себе, а не о других ("я хочу", а не "чтобы он изменился")
-3. **Позитивная формулировка** — цель сформулирована позитивно ("хочу спокойствие", а не "не хочу тревоги")
-4. **Экологичность** — достижение цели не навредит клиенту или окружающим
-5. **Важность** — если оценка важности < 8 из 10, ищи более глубокий контекст
+3. **Конкретность** — запрос сформулирован конкретно, а не абстрактно
+4. **Реалистичность** — достижение цели реально и экологично
+5. **Мотивация** — проверка "как будешь себя чувствовать, когда получишь это"
 
 ## ЕСЛИ КЛИЕНТ ГОВОРИТ "НЕ ЗНАЮ":
 Это нормально! Используй технику "если бы":
@@ -55,8 +77,6 @@ const BASE_MPT_PRINCIPLES = `Ты — опытный МПТ-терапевт (М
 - "А если бы видел образ — каким бы он мог быть?"
 - "Просто позволь себе пофантазировать — если бы..."
 
-Эта техника помогает обойти сознательные блоки и получить доступ к интуитивному знанию.
-
 ## ТЕЛЕСНЫЕ ПРАКТИКИ ЧЕРЕЗ ТЕКСТ:
 Даже в текстовом формате можно работать с телом. Предлагай микро-движения:
 - "Позволь себе немного подвигать плечами, пока мы общаемся"
@@ -65,14 +85,14 @@ const BASE_MPT_PRINCIPLES = `Ты — опытный МПТ-терапевт (М
 - "Если возникает импульс подвигаться — позволь себе это"
 
 ## КРИТИЧЕСКИ ВАЖНО — СТРОГАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ ЭТАПОВ:
-**НЕЛЬЗЯ ПЕРЕСКАКИВАТЬ ЭТАПЫ!** Ты ОБЯЗАН проходить разделы скрипта СТРОГО ПО ПОРЯДКУ.
+**НЕЛЬЗЯ ПЕРЕСКАКИВАТЬ ЭТАПЫ!** Ты ОБЯЗАН проходить этапы СТРОГО ПО ПОРЯДКУ.
 
 **ЗАПРЕЩЕНО:**
-- Задавать вопросы про образы и метафоры ДО соответствующего этапа скрипта
-- Задавать вопросы про телесные ощущения ДО соответствующего этапа
-- Переходить к метапозиции ДО полного прохождения начальных этапов
-- Смешивать вопросы из разных разделов
-- Интерпретировать ответы клиента вместо следования скрипту
+- Задавать вопросы про образы и метафоры ДО этапа "Создание образа"
+- Задавать вопросы про телесные ощущения ДО этапа "Телесная работа"
+- Переходить к метапозиции ДО полного прохождения предыдущих этапов
+- Смешивать вопросы из разных этапов
+- Интерпретировать ответы клиента вместо следования структуре
 - Давать советы и интерпретации — вместо этого задавай вопросы
 
 ## СЦЕНАРИИ РАБОТЫ (темы клиентских запросов):
@@ -97,7 +117,7 @@ const BASE_MPT_PRINCIPLES = `Ты — опытный МПТ-терапевт (М
 - Веди себя как тёплый, принимающий, но профессиональный терапевт.
 - **КРИТИЧЕСКИ ВАЖНО: ЗАДАВАЙ МАКСИМУМ 1-2 ВОПРОСА ЗА ОТВЕТ!** Никогда не задавай 3 или более вопросов в одном сообщении. Это перегружает клиента. Один глубокий вопрос лучше трёх поверхностных.
 - Отражай чувства клиента, проявляй эмпатию.
-- Двигайся по этапам скрипта последовательно и медленно — по одному вопросу за раз.
+- Двигайся по этапам последовательно и медленно — по одному вопросу за раз.
 - Не торопи клиента, дай время осмыслить каждый вопрос.
 - Используй имя клиента, если он его назвал.
 - **ПИШИ ГРАМОТНО НА РУССКОМ ЯЗЫКЕ**: Соблюдай правила русской грамматики, правильно склоняй слова, согласуй падежи, роды и числа. Предложения должны быть логичными и понятными. Избегай корявых конструкций и стилистических ошибок.
@@ -106,28 +126,17 @@ const BASE_MPT_PRINCIPLES = `Ты — опытный МПТ-терапевт (М
 ## ОБЯЗАТЕЛЬНАЯ МЕТОДИЧЕСКАЯ РАЗМЕТКА (ДЛЯ ОБУЧЕНИЯ СТУДЕНТОВ):
 **В КАЖДОМ своём ответе** в самом начале указывай в квадратных скобках:
 1. Название текущего сценария (если определён)
-2. Название используемого скрипта
-3. Раздел скрипта, на котором находишься
+2. Текущий этап МПТ-сессии
 
-Формат: **[Сценарий: название | Скрипт: название скрипта | Раздел: название раздела]**
+Формат: **[Сценарий: название | Этап: название этапа]**
 
 Примеры:
-- [Сценарий: Тревожный звоночек | Скрипт: Исследование страха | Раздел: 1. Обнаружение страха]
-- [Сценарий: День сурка | Скрипт: Исследование стратегии | Раздел: 2. Поиск глубинной потребности]
-- [Сценарий: не определён | Скрипт: Исследование стратегии | Раздел: 1. Исследование целей]
-- [Сценарий: Внутренний критик | Скрипт: Теневое желание | Раздел: 3. Исследование желания]
+- [Сценарий: Тревожный звоночек | Этап: Телесная работа]
+- [Сценарий: День сурка | Этап: Поиск потребности]
+- [Сценарий: не определён | Этап: Сбор контекста]
+- [Сценарий: Внутренний критик | Этап: Метапозиция]
 
 Это помогает студентам-психологам видеть структуру МПТ-сессии и учиться работать по методу. После разметки продолжай обычный терапевтический ответ.
-
-## НАЧАЛО СЕССИИ:
-Если это первое сообщение сессии — тепло поприветствуй и спроси, что беспокоит клиента или над чем он хотел бы поработать сегодня. Например: "Привет! Рад тебя видеть. Расскажи, что тебя сейчас беспокоит или над чем хотел бы поработать?"
-
-## ЗАВЕРШЕНИЕ СЕССИИ:
-Когда сессия подходит к завершению (этап "Практики внедрения"):
-1. Подведи краткий итог работы
-2. Напомни ключевой инсайт или метафору
-3. Предложи конкретную практику внедрения для закрепления результата
-4. Спроси, готов ли клиент к первому шагу
 
 ## ОБРАБОТКА НЕПОНЯТНЫХ СООБЩЕНИЙ:
 Если клиент пишет бессмыслицу, набор букв, непонятный текст или что-то неразборчивое — не пытайся это интерпретировать или придумывать смысл. Вежливо попроси уточнить: "Извини, я не совсем понял. Можешь переформулировать или написать подробнее, что ты имеешь в виду?"`;
@@ -146,16 +155,9 @@ function detectScenario(message: string): { id: string; name: string } | null {
   return null;
 }
 
-function getPhase(messages: Message[]): string {
-  const count = messages.length;
-  if (count <= 2) return "Исследование запроса";
-  if (count <= 6) return "Исследование целей";
-  if (count <= 10) return "Поиск потребности";
-  if (count <= 14) return "Энергия потребности";
-  if (count <= 18) return "Метапозиция";
-  if (count <= 22) return "Интеграция";
-  if (count <= 26) return "Новые действия";
-  return "Практики внедрения";
+function getPhaseFromStage(stage: MPTStage): string {
+  const config = MPT_STAGE_CONFIG[stage];
+  return config?.russianName || "Исследование запроса";
 }
 
 export async function registerRoutes(
@@ -190,6 +192,11 @@ export async function registerRoutes(
         const requestType = detectRequestType(message);
         const selectedScript = selectBestScript(message, detectedScenario?.id || null);
         
+        const initialState = createInitialSessionState();
+        initialState.requestType = requestType;
+        initialState.context.originalRequest = message;
+        initialState.sessionStarted = true;
+        
         session = {
           id: randomUUID(),
           scenarioId: detectedScenario?.id || null,
@@ -197,13 +204,22 @@ export async function registerRoutes(
           scriptId: selectedScript.id,
           scriptName: selectedScript.name,
           messages: [],
-          phase: "Исследование запроса",
+          phase: getPhaseFromStage(initialState.currentStage),
           createdAt: new Date().toISOString(),
+          state: {
+            currentStage: initialState.currentStage,
+            currentQuestionIndex: initialState.currentQuestionIndex,
+            stageHistory: initialState.stageHistory,
+            context: initialState.context,
+            requestType: initialState.requestType || null,
+            importanceRating: initialState.importanceRating,
+            lastClientResponse: initialState.lastClientResponse,
+            clientSaysIDontKnow: initialState.clientSaysIDontKnow,
+            movementOffered: initialState.movementOffered,
+            integrationComplete: initialState.integrationComplete
+          }
         };
         sessions.set(session.id, session);
-        
-        const initialState = createInitialSessionState();
-        initialState.requestType = requestType;
         sessionStates.set(session.id, initialState);
       }
       
@@ -237,11 +253,13 @@ export async function registerRoutes(
       let sessionState = sessionStates.get(session.id);
       if (!sessionState) {
         sessionState = createInitialSessionState();
+        sessionState.context.originalRequest = message;
         sessionStates.set(session.id, sessionState);
       }
       
       sessionState.lastClientResponse = message;
       sessionState.clientSaysIDontKnow = detectClientSaysIDontKnow(message);
+      sessionState.stageResponseCount++;
       
       const clientName = extractClientName(session.messages.map(m => ({ role: m.role, content: m.content })));
       if (clientName) {
@@ -253,7 +271,22 @@ export async function registerRoutes(
         sessionState.importanceRating = importanceRating;
       }
       
+      const authorshipTransform = transformToAuthorship(message);
+      
+      if (shouldTransitionToNextStage(sessionState)) {
+        const newState = transitionToNextStage(sessionState);
+        Object.assign(sessionState, newState);
+        sessionStates.set(session.id, sessionState);
+      }
+      
       let contextualPrompt = BASE_MPT_PRINCIPLES;
+      
+      const stagePrompt = generateStagePrompt(sessionState);
+      contextualPrompt += stagePrompt;
+      
+      if (authorshipTransform) {
+        contextualPrompt += `\n\n## ТРАНСФОРМАЦИЯ В АВТОРСТВО:\n${authorshipTransform}`;
+      }
       
       if (sessionState.context.clientName) {
         contextualPrompt += `\n\n## КОНТЕКСТ КЛИЕНТА:\nИмя клиента: ${sessionState.context.clientName}. Используй имя в своих ответах.`;
@@ -267,8 +300,7 @@ export async function registerRoutes(
       }
       
       if (sessionState.clientSaysIDontKnow) {
-        const lastAssistantMsg = session.messages.filter(m => m.role === 'assistant').pop();
-        const helpingQ = getHelpingQuestion(lastAssistantMsg?.content || '');
+        const helpingQ = getHelpingQuestion(sessionState.currentStage, '');
         contextualPrompt += `\n\n## ВНИМАНИЕ: Клиент говорит "не знаю"!\nИспользуй технику "если бы". Например: "${helpingQ}"`;
       }
       
@@ -279,17 +311,25 @@ export async function registerRoutes(
         }
       }
       
-      if (session.scriptId) {
-        const script = getScriptById(session.scriptId);
-        if (script) {
-          contextualPrompt += generateScriptGuidance(script);
-        }
+      if (sessionState.requestType && sessionState.requestType !== 'general') {
+        contextualPrompt += `\n\n## ТИП ЗАПРОСА КЛИЕНТА: ${sessionState.requestType}\nРекомендуемый подход: ${REQUEST_TYPE_SCRIPTS[sessionState.requestType]}`;
       }
       
-      if (session.phase === "Практики внедрения") {
+      if (sessionState.currentStage === 'finish') {
         const homework = selectHomework(sessionState.context);
         contextualPrompt += `\n\n## ПРАКТИКА ВНЕДРЕНИЯ:\nПредложи клиенту практику: "${homework.name}" — ${homework.description}`;
       }
+      
+      contextualPrompt += `\n\n## ПРОГРЕСС СЕССИИ:
+- Текущий этап: ${MPT_STAGE_CONFIG[sessionState.currentStage].russianName} (${sessionState.stageResponseCount} ответов на этапе)
+- Пройденные этапы: ${sessionState.stageHistory.map(s => MPT_STAGE_CONFIG[s].russianName).join(' → ') || 'начало сессии'}
+- Собранный контекст:
+  ${sessionState.context.originalRequest ? `- Изначальный запрос: "${sessionState.context.originalRequest}"` : ''}
+  ${sessionState.context.clarifiedRequest ? `- Уточнённый запрос: "${sessionState.context.clarifiedRequest}"` : ''}
+  ${sessionState.context.currentStrategy ? `- Текущая стратегия: "${sessionState.context.currentStrategy}"` : ''}
+  ${sessionState.context.deepNeed ? `- Глубинная потребность: "${sessionState.context.deepNeed}"` : ''}
+  ${sessionState.context.bodyLocation ? `- Телесное ощущение: "${sessionState.context.bodyLocation}"` : ''}
+  ${sessionState.context.metaphor ? `- Образ/метафора: "${sessionState.context.metaphor}"` : ''}`;
       
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
@@ -302,7 +342,9 @@ export async function registerRoutes(
         scenarioId: session.scenarioId, 
         scenarioName: session.scenarioName,
         scriptId: session.scriptId,
-        scriptName: session.scriptName
+        scriptName: session.scriptName,
+        currentStage: sessionState.currentStage,
+        stageName: MPT_STAGE_CONFIG[sessionState.currentStage].russianName
       })}\n\n`);
       
       const stream = await client.chat.completions.create({
@@ -336,11 +378,13 @@ export async function registerRoutes(
       };
       session.messages.push(assistantMessage);
       
-      session.phase = getPhase(session.messages);
+      session.phase = getPhaseFromStage(sessionState.currentStage);
       
       res.write(`data: ${JSON.stringify({ 
         type: "done", 
-        phase: session.phase 
+        phase: session.phase,
+        currentStage: sessionState.currentStage,
+        stageName: MPT_STAGE_CONFIG[sessionState.currentStage].russianName
       })}\n\n`);
       
       res.end();
@@ -368,6 +412,8 @@ export async function registerRoutes(
     
     const selectedScript = selectBestScript("", scenario?.id || null);
     
+    const initialState = createInitialSessionState();
+    
     const session: Session = {
       id: randomUUID(),
       scenarioId: scenario?.id || null,
@@ -375,13 +421,23 @@ export async function registerRoutes(
       scriptId: selectedScript.id,
       scriptName: selectedScript.name,
       messages: [],
-      phase: "Исследование запроса",
+      phase: getPhaseFromStage(initialState.currentStage),
       createdAt: new Date().toISOString(),
+      state: {
+        currentStage: initialState.currentStage,
+        currentQuestionIndex: initialState.currentQuestionIndex,
+        stageHistory: initialState.stageHistory,
+        context: initialState.context,
+        requestType: initialState.requestType || null,
+        importanceRating: initialState.importanceRating,
+        lastClientResponse: initialState.lastClientResponse,
+        clientSaysIDontKnow: initialState.clientSaysIDontKnow,
+        movementOffered: initialState.movementOffered,
+        integrationComplete: initialState.integrationComplete
+      }
     };
     
     sessions.set(session.id, session);
-    
-    const initialState = createInitialSessionState();
     sessionStates.set(session.id, initialState);
     
     return res.json({
@@ -391,11 +447,17 @@ export async function registerRoutes(
       scriptId: session.scriptId,
       scriptName: session.scriptName,
       phase: session.phase,
+      currentStage: initialState.currentStage,
+      stageName: MPT_STAGE_CONFIG[initialState.currentStage].russianName
     });
   });
   
   app.get("/api/scenarios", (req, res) => {
     return res.json(scenarios);
+  });
+  
+  app.get("/api/stages", (req, res) => {
+    return res.json(MPT_STAGE_CONFIG);
   });
 
   return httpServer;
